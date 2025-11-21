@@ -1,5 +1,5 @@
 cat > .bandit.yml << 'EOF'
-skips: [B105, B106, B107, B108]
+skip: [B105, B106, B107, B108]
 EOF
 
 git add .bandit.yml
