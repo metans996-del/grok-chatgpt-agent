@@ -1,2 +1,2 @@
 # bandit.yaml
-skip: B105,B106,B107,B108
+skip: B101,B404,B603,B607
