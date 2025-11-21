@@ -1,2 +1,1 @@
-# bandit.yaml
 skip: B101,B404,B603,B607
