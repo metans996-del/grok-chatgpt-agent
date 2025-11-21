@@ -2,7 +2,7 @@ import os
 import tempfile
 import time
 import subprocess
-from github import Github
+from github import Github, ContentFile
 from typing import Tuple
 
 
@@ -14,7 +14,7 @@ def require_env(name: str) -> str:
     return value
 
 
-GITHUB_TOKEN: str = require_env("ZXC")
+GITHUB_TOKEN: str = require_env("GH_PAT")
 REPO_NAME: str = require_env("REPO_NAME")
 SANDBOX_IMAGE: str = os.getenv("SANDBOX_IMAGE", "sandbox-test:latest")
 
@@ -54,9 +54,12 @@ def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str
         sha=base.commit.sha
     )
 
-    contents = repo.get_contents(file_path, ref=repo.default_branch)
-    # Теперь mypy знает, что contents — ContentFile, не список
-    assert not isinstance(contents, list)
+    contents_raw = repo.get_contents(file_path, ref=repo.default_branch)
+
+    # Явное приведение типов — теперь mypy НЕ ругается
+    if isinstance(contents_raw, list):
+        raise RuntimeError("Unexpected: get_contents returned a list")
+    contents: ContentFile = contents_raw
 
     repo.update_file(
         path=file_path,
@@ -72,34 +75,8 @@ def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str
         head=branch_name,
         base=repo.default_branch
     )
+
     return pr.html_url
 
 
 def propose_change_example() -> None:
-    with tempfile.TemporaryDirectory() as d:
-        clone_repo(d)
-
-        target = os.path.join(d, "agent", "sample_module.py")
-        if not os.path.exists(target):
-            print("Target file not found:", target)
-            return
-
-        with open(target, "r", encoding="utf-8") as f:
-            src = f.read()
-
-        new_src = src.replace("TODO_FIX_ME", "fixed_by_agent()")
-
-        ok, msg = run_tests_in_docker(d)
-
-        pr_url = create_branch_and_pr(
-            "agent/sample_module.py",
-            new_src,
-            "Agent: автопредложение фикса",
-            f"Результат тестов: {msg}"
-        )
-
-        print("PR создан:", pr_url)
-
-
-if __name__ == "__main__":
-    propose_change_example()
