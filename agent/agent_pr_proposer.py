@@ -2,19 +2,19 @@ import os
 import tempfile
 import time
 import subprocess
-from github import Github, ContentFile
 from typing import Tuple
+from github import Github
 
 
 def require_env(name: str) -> str:
-    """Гарантирует что переменная окружения существует (для mypy)."""
+    """Гарантирует, что переменная окружения существует."""
     value = os.getenv(name)
     if value is None:
         raise RuntimeError(f"Environment variable '{name}' is missing")
     return value
 
 
-GITHUB_TOKEN: str = require_env("GH_PAT")
+GITHUB_TOKEN: str = require_env("ZXC")
 REPO_NAME: str = require_env("REPO_NAME")
 SANDBOX_IMAGE: str = os.getenv("SANDBOX_IMAGE", "sandbox-test:latest")
 
@@ -42,7 +42,13 @@ def run_tests_in_docker(repo_dir: str) -> Tuple[bool, str]:
     return False, f"Tests failed (code {run.returncode})"
 
 
-def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str) -> str:
+def create_branch_and_pr(
+    file_path: str,
+    new_content: str,
+    title: str,
+    body: str
+) -> str:
+    """Создаёт ветку и Pull Request в GitHub."""
     g = Github(GITHUB_TOKEN)
     repo = g.get_repo(REPO_NAME)
 
@@ -54,12 +60,8 @@ def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str
         sha=base.commit.sha
     )
 
-    contents_raw = repo.get_contents(file_path, ref=repo.default_branch)
-
-    # Явное приведение типов — теперь mypy НЕ ругается
-    if isinstance(contents_raw, list):
-        raise RuntimeError("Unexpected: get_contents returned a list")
-    contents: ContentFile = contents_raw
+    contents = repo.get_contents(file_path, ref=repo.default_branch)
+    assert not isinstance(contents, list)
 
     repo.update_file(
         path=file_path,
@@ -75,8 +77,35 @@ def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str
         head=branch_name,
         base=repo.default_branch
     )
-
     return pr.html_url
 
 
 def propose_change_example() -> None:
+    """Пример автоматического предложения изменений."""
+    with tempfile.TemporaryDirectory() as d:
+        clone_repo(d)
+
+        target = os.path.join(d, "agent", "sample_module.py")
+        if not os.path.exists(target):
+            print("Target file not found:", target)
+            return
+
+        with open(target, "r", encoding="utf-8") as f:
+            src = f.read()
+
+        new_src = src.replace("TODO_FIX_ME", "fixed_by_agent()")
+
+        ok, msg = run_tests_in_docker(d)
+
+        pr_url = create_branch_and_pr(
+            "agent/sample_module.py",
+            new_src,
+            "Agent: автопредложение фикса",
+            f"Результат тестов: {msg}"
+        )
+
+        print("PR создан:", pr_url)
+
+
+if __name__ == "__main__":
+    propose_change_example()
