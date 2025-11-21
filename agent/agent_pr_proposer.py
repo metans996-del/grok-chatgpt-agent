@@ -3,33 +3,47 @@
 import os
 import tempfile
 import time
+import shutil
 import subprocess
 from github import Github
+from typing import Tuple
 
-
+# Переменные окружения
 GITHUB_TOKEN = os.getenv("ZXC")
-REPO_NAME = os.getenv("metans996-del/grok-chatgpt-agent")  # e.g. your-username/grok-chatgpt-agent
+REPO_NAME = os.getenv("metans996-del/grok-chatgpt-agent")
 SANDBOX_IMAGE = os.getenv("SANDBOX_IMAGE", "sandbox-test:latest")
 
+# Проверка токена и репозитория
+if not GITHUB_TOKEN or not REPO_NAME:
+    raise RuntimeError("Не заданы GITHUB_TOKEN или REPO_NAME")
 
-def clone_repo(tmpdir):
+# Полные пути к git и docker
+git_path = shutil.which("git")
+docker_path = shutil.which("docker")
+if not git_path or not docker_path:
+    raise RuntimeError("Git или Docker не найдены в PATH")
+
+
+def clone_repo(tmpdir: str) -> None:
+    """Клонирует репозиторий в указанный каталог"""
     repo_url = f"https://{GITHUB_TOKEN}:x-oauth-basic@github.com/{REPO_NAME}.git"
-    subprocess.run(["git", "clone", repo_url, tmpdir], check=True)
+    subprocess.run([git_path, "clone", repo_url, tmpdir], check=True)
 
 
-def run_tests_in_docker(repo_dir):
-    p = subprocess.run(["docker", "build", "-t", SANDBOX_IMAGE, "."], cwd=repo_dir)
-    if p.returncode != 0:
+def run_tests_in_docker(repo_dir: str) -> Tuple[bool, str]:
+    """Собирает Docker образ и запускает контейнер с тестами"""
+    build = subprocess.run([docker_path, "build", "-t", SANDBOX_IMAGE, "."], cwd=repo_dir)
+    if build.returncode != 0:
         return False, "Docker build failed"
 
-    r = subprocess.run(["docker", "run", "--rm", SANDBOX_IMAGE], cwd=repo_dir)
-    if r.returncode == 0:
+    run = subprocess.run([docker_path, "run", "--rm", SANDBOX_IMAGE], cwd=repo_dir)
+    if run.returncode == 0:
         return True, "Tests OK"
+    return False, f"Tests failed (code {run.returncode})"
 
-    return False, f"Tests failed (code {r.returncode})"
 
-
-def create_branch_and_pr(file_path, new_content, title, body):
+def create_branch_and_pr(file_path: str, new_content: str, title: str, body: str) -> str:
+    """Создаёт ветку, обновляет файл и создаёт Pull Request"""
     g = Github(GITHUB_TOKEN)
     repo = g.get_repo(REPO_NAME)
     base = repo.get_branch(repo.default_branch)
@@ -50,7 +64,8 @@ def create_branch_and_pr(file_path, new_content, title, body):
     return pr.html_url
 
 
-def propose_change_example():
+def propose_change_example() -> None:
+    """Пример функции, которая клонирует репозиторий, меняет файл и создаёт PR"""
     with tempfile.TemporaryDirectory() as d:
         clone_repo(d)
 
