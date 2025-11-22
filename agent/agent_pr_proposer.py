@@ -19,15 +19,17 @@ REPO_NAME: str = require_env("REPO_NAME")
 SANDBOX_IMAGE: str = os.getenv("SANDBOX_IMAGE", "sandbox-test:latest")
 
 
-def clone_repo(tmpdir: str) -> None:
-    repo_url = f"https://{GITHUB_TOKEN}:x-oauth-basic@github.com/{REPO_NAME}.git"
-    def safe_run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
+def safe_run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
+    """Безопасный запуск git/docker."""
     allowed = {"git", "docker"}
     if cmd[0] not in allowed:
         raise RuntimeError(f"Blocked unsafe command: {cmd[0]}")
     return subprocess.run(cmd, cwd=cwd, check=True)
 
-safe_run(["git", "clone", repo_url, tmpdir])
+
+def clone_repo(tmpdir: str) -> None:
+    repo_url = f"https://{GITHUB_TOKEN}:x-oauth-basic@github.com/{REPO_NAME}.git"
+    safe_run(["git", "clone", repo_url, tmpdir])
 
 
 def run_tests_in_docker(repo_dir: str) -> Tuple[bool, str]:
