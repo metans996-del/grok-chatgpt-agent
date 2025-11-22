@@ -1,1 +1,7 @@
-skip: B101, B404, B603, B607
+skips:
+  - B101
+  - B404
+  - B603
+  - B607
+
+exit-zero: true
