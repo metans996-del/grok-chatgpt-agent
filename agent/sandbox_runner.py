@@ -2,12 +2,14 @@ import subprocess
 from pathlib import Path
 from typing import Tuple
 
-
 def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
     repo_path = str(path)
 
+    # Указываем путь к Dockerfile на уровень выше
+    dockerfile_path = Path(repo_path).parent / "Dockerfile"
+
     build = subprocess.run(
-        ["docker", "build", "-t", "sandbox-test:local", "."],
+        ["docker", "build", "-f", str(dockerfile_path), "-t", "sandbox-test:local", str(dockerfile_path.parent)],
         cwd=repo_path
     )
     if build.returncode != 0:
@@ -21,7 +23,6 @@ def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
         return True, "OK"
 
     return False, f"Fail code {run.returncode}"
-
 
 if __name__ == "__main__":
     ok, msg = run_sandbox_tests()

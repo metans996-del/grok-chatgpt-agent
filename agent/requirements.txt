@@ -1,0 +1,7 @@
+PyGithub==1.59.1
+python-telegram-bot==20.3
+pytest==7.4.0
+flake8
+mypy
+bandit
+requests
