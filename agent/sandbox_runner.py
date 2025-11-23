@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 from typing import Tuple
 
+
 def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
     repo_path = str(path)
 
@@ -23,6 +24,7 @@ def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
         return True, "OK"
 
     return False, f"Fail code {run.returncode}"
+
 
 if __name__ == "__main__":
     ok, msg = run_sandbox_tests()
