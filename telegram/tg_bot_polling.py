@@ -523,3 +523,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_text += f"• Сброс: {rate_limit.core.reset.strftime('%H:%M:%S')}\n"
         
         await update.message.reply_text(status_text, parse_mode='HTML')
+
+    # ВАЖНО: Добавьте блок except для корректной обработки ошибок
+    except Exception as e:
+        error_msg_safe = escape_html(f"❌ Ошибка подключения к GitHub: {e}")
+        logger.error(f"Ошибка в status_command: {e}")
+        await update.message.reply_text(error_msg_safe, parse_mode='HTML')
+
+# Здесь функция status_command завершается
