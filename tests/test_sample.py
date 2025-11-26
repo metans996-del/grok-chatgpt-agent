@@ -1,2 +1,4 @@
-def test_dummy():
-    assert 1 + 1 == 2
+import pytest
+
+def test_sample():
+    assert True
