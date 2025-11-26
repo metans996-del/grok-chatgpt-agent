@@ -522,4 +522,4 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_text += f"• Осталось: {rate_limit.core.remaining}/{rate_limit.core.limit}\n"
         status_text += f"• Сброс: {rate_limit.core.reset.strftime('%H:%M:%S')}\n"
         
-        await update.message.reply_text(status_text, parse_mode='HTML
+        await update.message.reply_text(status_text, parse_mode='HTML')
