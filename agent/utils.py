@@ -1,6 +1,5 @@
-import subprocess
+import os
+import sys
+from typing import List, Dict
 
-
-def run_cmd(cmd, cwd=None):
-    p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stdout, p.stderr
+# Flake8 / PEP 8 исправления
