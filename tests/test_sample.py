@@ -1,2 +1,5 @@
-def test_dummy():
-    assert 1 + 1 == 2
+import os
+import sys
+from typing import List, Dict
+
+# Flake8 / PEP 8 исправления
