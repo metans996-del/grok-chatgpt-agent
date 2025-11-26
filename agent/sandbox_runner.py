@@ -1,52 +1,20 @@
-import subprocess
-from pathlib import Path
-from typing import Tuple
+import logging
+import os
+from typing import Dict, List
+
+import docker
+from docker.errors import DockerException
+
+logger = logging.getLogger(__name__)
 
 
-def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
-    """
-    Запускает тесты в изолированном Docker-контейнере.
-
-    Args:
-        path: Путь к репозиторию (по умолчанию текущая директория)
-
-    Returns:
-        Tuple[bool, str]: (успех, сообщение)
-    """
-    repo_path = str(path)
-
-    # Указываем путь к Dockerfile на уровень выше
-    dockerfile_path = Path(repo_path).parent / "Dockerfile"
-
-    build = subprocess.run(
-        [
-            "docker",
-            "build",
-            "-f",
-            str(dockerfile_path),
-            "-t",
-            "sandbox-test:local",
-            str(dockerfile_path.parent),
-        ],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
-    if build.returncode != 0:
-        return False, f"Build failed:\n{build.stderr}"
-
-    run = subprocess.run(
-        ["docker", "run", "--rm", "sandbox-test:local"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
-    if run.returncode == 0:
-        return True, "OK"
-
-    return False, f"Tests failed (exit code {run.returncode}):\n{run.stderr}"
-
-
-if __name__ == "__main__":
-    ok, msg = run_sandbox_tests()
-    print(ok, msg)
+def run_sandbox(image: str, command: str) -> Dict[str, str]:
+    try:
+        client = docker.from_env()
+        container = client.containers.run(image, command, detach=True)
+        container.wait()
+        output = container.logs(stdout=True, stderr=True).decode('utf-8')
+        return {'status': 'success', 'output': output}
+    except DockerException as e:
+        logger.error(f'Error running sandbox: {e}')
+        return {'status': 'failure', 'message': 'Error running sandbox'}
