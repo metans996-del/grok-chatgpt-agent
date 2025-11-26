@@ -1,6 +1,13 @@
-import subprocess
+import logging
+import os
+from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 
-def run_cmd(cmd, cwd=None):
-    p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stdout, p.stderr
+def get_env_variable(var_name: str) -> str:
+    try:
+        return os.environ[var_name]
+    except KeyError:
+        logger.error(f'Environment variable {var_name} not found')
+        return ''
