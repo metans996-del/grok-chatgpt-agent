@@ -66,3 +66,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def run_polling():
+    from telegram.ext import Application
+    import asyncio, os
+    from dotenv import load_dotenv
+    load_dotenv()
+    TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    app = Application.builder().token(TOKEN).build()
+    from . import dp  # если у тебя там диспатчер
+    app.add_handler(dp if "dp" in locals() else None)
+    print("Бот запущен в polling режиме")
+    asyncio.run(app.run_polling())
+
