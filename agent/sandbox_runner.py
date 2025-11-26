@@ -1,52 +1,21 @@
-import subprocess
-from pathlib import Path
-from typing import Tuple
+import docker
 
 
-def run_sandbox_tests(path: str | Path = ".") -> Tuple[bool, str]:
-    """
-    Запускает тесты в изолированном Docker-контейнере.
+class SandboxRunner:
+    def __init__(self, image_name):
+        self.client = docker.from_env()
+        self.image_name = image_name
 
-    Args:
-        path: Путь к репозиторию (по умолчанию текущая директория)
+    def run_code(self, code):
+        container = self.client.containers.run(
+            self.image_name,
+            f"python -c '{code}'",
+            detach=True,
+            stderr=True,
+            stdout=True
+        )
 
-    Returns:
-        Tuple[bool, str]: (успех, сообщение)
-    """
-    repo_path = str(path)
+        output = container.logs().decode("utf-8")
+        container.remove()
 
-    # Указываем путь к Dockerfile на уровень выше
-    dockerfile_path = Path(repo_path).parent / "Dockerfile"
-
-    build = subprocess.run(
-        [
-            "docker",
-            "build",
-            "-f",
-            str(dockerfile_path),
-            "-t",
-            "sandbox-test:local",
-            str(dockerfile_path.parent),
-        ],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
-    if build.returncode != 0:
-        return False, f"Build failed:\n{build.stderr}"
-
-    run = subprocess.run(
-        ["docker", "run", "--rm", "sandbox-test:local"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
-    if run.returncode == 0:
-        return True, "OK"
-
-    return False, f"Tests failed (exit code {run.returncode}):\n{run.stderr}"
-
-
-if __name__ == "__main__":
-    ok, msg = run_sandbox_tests()
-    print(ok, msg)
+        return output
