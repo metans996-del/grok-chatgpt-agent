@@ -1,119 +1,57 @@
 import os
-import tempfile
-import time
-import subprocess
-from typing import Tuple
-from github import Github
+import base64
+from github import Github, GithubException
 
 
-def require_env(name: str) -> str:
-    """Гарантирует, что переменная окружения существует."""
-    value = os.getenv(name)
-    if value is None:
-        raise RuntimeError(f"Environment variable '{name}' is missing")
-    return value
+class AgentPRProposer:
+    def __init__(self, github_token, repo_name):
+        self.github = Github(github_token)
+        self.repo = self.github.get_repo(repo_name)
+
+    def propose_pr(self, title, body):
+        default_branch = self.repo.default_branch
+        head_branch = f"agent-pr-{os.urandom(4).hex()}"
+
+        try:
+            base = self.repo.get_branch(default_branch)
+            self.repo.create_git_ref(f"refs/heads/{head_branch}", base.commit.sha)
+
+            self.create_or_update_file(head_branch, "agent/utils.py", self.get_utils_code())
+            self.create_or_update_file(head_branch, "agent/utils.txt", self.get_utils_txt())
+            self.create_or_update_file(head_branch, "agent/monetization.txt", self.get_monetization_txt())
+
+            pr = self.repo.create_pull(title=title, body=body, head=head_branch, base=default_branch)
+            print(f"Created pull request: {pr.html_url}")
+
+        except GithubException as e:
+            print(f"Error: {e}")
+            raise e
+
+    def create_or_update_file(self, branch, file_path, content):
+        try:
+            contents = self.repo.get_contents(file_path, ref=branch)
+            self.repo.update_file(contents.path, f"Update {file_path}", content, contents.sha, branch=branch)
+        except:
+            self.repo.create_file(file_path, f"Add {file_path}", content, branch=branch)
+
+    def get_utils_code(self):
+        return """\
+def generate_code():
+    # Add your code generation logic here
+    return \"\"\"\
+\"\"\"\
 
 
-GITHUB_TOKEN: str = require_env("ZXC")
-REPO_NAME: str = require_env("REPO_NAME")
-SANDBOX_IMAGE: str = os.getenv("SANDBOX_IMAGE", "sandbox-test:latest")
+def analyze_code(code):
+    # Add your code analysis logic here
+    return "Analysis results"
+"""
 
+    def get_utils_txt(self):
+        return "This file contains utility functions for the agent."
 
-def safe_run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
-    """Безопасный запуск git/docker."""
-    allowed = {"git", "docker"}
-    if cmd[0] not in allowed:
-        raise RuntimeError(f"Blocked unsafe command: {cmd[0]}")
-    return subprocess.run(cmd, cwd=cwd, check=True)
-
-
-def clone_repo(tmpdir: str) -> None:
-    repo_url = f"https://{GITHUB_TOKEN}:x-oauth-basic@github.com/{REPO_NAME}.git"
-    safe_run(["git", "clone", repo_url, tmpdir])
-
-
-def run_tests_in_docker(repo_dir: str) -> Tuple[bool, str]:
-    build = subprocess.run(
-        ["docker", "build", "-t", SANDBOX_IMAGE, "."],
-        cwd=repo_dir
-    )
-    if build.returncode != 0:
-        return False, "Docker build failed"
-
-    run = subprocess.run(
-        ["docker", "run", "--rm", SANDBOX_IMAGE],
-        cwd=repo_dir
-    )
-
-    if run.returncode == 0:
-        return True, "Tests OK"
-    return False, f"Tests failed (code {run.returncode})"
-
-
-def create_branch_and_pr(
-    file_path: str,
-    new_content: str,
-    title: str,
-    body: str
-) -> str:
-    """Создаёт ветку и Pull Request в GitHub."""
-    g = Github(GITHUB_TOKEN)
-    repo = g.get_repo(REPO_NAME)
-
-    base = repo.get_branch(repo.default_branch)
-    branch_name = f"agent-proposal/{int(time.time())}"
-
-    repo.create_git_ref(
-        ref=f"refs/heads/{branch_name}",
-        sha=base.commit.sha
-    )
-
-    contents = repo.get_contents(file_path, ref=repo.default_branch)
-    assert not isinstance(contents, list)
-
-    repo.update_file(
-        path=file_path,
-        message=f"[agent] {title}",
-        content=new_content,
-        sha=contents.sha,
-        branch=branch_name
-    )
-
-    pr = repo.create_pull(
-        title=title,
-        body=body,
-        head=branch_name,
-        base=repo.default_branch
-    )
-    return pr.html_url
-
-
-def propose_change_example() -> None:
-    """Пример автоматического предложения изменений."""
-    with tempfile.TemporaryDirectory() as d:
-        clone_repo(d)
-
-        target = os.path.join(d, "agent", "sample_module.py")
-        if not os.path.exists(target):
-            print("Target file not found:", target)
-            return
-
-        with open(target, "r", encoding="utf-8") as f:
-            src = f.read()
-
-        new_src = src.replace("TODO_FIX_ME", "fixed_by_agent()")
-
-        ok, msg = run_tests_in_docker(d)
-
-        pr_url = create_branch_and_pr(
-            "agent/sample_module.py",
-            new_src,
-            "Agent: автопредложение фикса",
-            f"Результат тестов: {msg}"
-        )
-
-        print("PR создан:", pr_url)
-
-
-if __name__ == "__main__":
-    propose_change_example()
+    def get_monetization_txt(self):
+        return "Ideas for monetizing the agent project:
+1. Offer premium features for a subscription fee.
+2. Provide a paid API for developers to access the agent's capabilities.
+3. Sell customized agent models trained on specific domains or tasks."
