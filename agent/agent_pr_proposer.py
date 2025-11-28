@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from typing import Dict
 import requests
 from requests.exceptions import RequestException
