@@ -20,4 +20,3 @@ def main() -> None:
     dispatcher.add_handler(start_handler)
     updater.start_polling()
     updater.idle()
-    

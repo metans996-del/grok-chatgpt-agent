@@ -17,4 +17,3 @@ def run_sandbox(image: str, command: str) -> Dict[str, str]:
     except DockerException as e:
         logger.error(f'Error running sandbox: {e}')
         return {'status': 'failure', 'message': 'Error running sandbox'}
-    

@@ -489,7 +489,7 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Тестовая команда для проверки работы моделей"""
     if not update.effective_message:
         return
-        
+
     logger.info(f"Команда /test от пользователя {update.effective_user.id}")
     message = await update.message.reply_text("⏳ Запускаю тестовый запрос к моделям...")
 
@@ -516,7 +516,7 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             action = escape_html(change.get('action', 'unknown'))
             content_len = len(change.get('content', ''))
             # F541: Исправлено использование f-строки
-            result_text += f"• <b>{file_name}</b> ({action}, {content_len} байт)\n" 
+            result_text += f"• <b>{file_name}</b> ({action}, {content_len} байт)\n"
 
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
@@ -541,7 +541,7 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
     """Проверка статуса подключения к GitHub"""
     if not update.effective_message:
         return
-        
+
     logger.info(f"Команда /status от пользователя {update.effective_user.id}")
     message = await update.message.reply_text("⏳ Проверяю подключение к GitHub...")
 
@@ -587,11 +587,11 @@ def main():
         # Добавляем обработчики команд
         application.add_handler(CommandHandler("start", start_command))
         # Меняем имя функции, чтобы избежать путаницы с /status
-        application.add_handler(CommandHandler("status", internal_status_command)) 
-        application.add_handler(CommandHandler("health", github_status_command)) 
+        application.add_handler(CommandHandler("status", internal_status_command))
+        application.add_handler(CommandHandler("health", github_status_command))
         application.add_handler(CommandHandler("runissue", run_issue_command))
         application.add_handler(CommandHandler("test", test_command))
-        
+
         # application.add_handler(CommandHandler("models", models_command)) # Нет реализации
 
         # Запускаем бота
