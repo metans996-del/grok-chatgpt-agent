@@ -23,6 +23,13 @@ jobs:
           pip install -r requirements.txt
           pip install flake8 mypy bandit
 
+          # 🚨 ИСПРАВЛЕНИЕ: Установка типов для Mypy, необходимых для requests.
+          # GitHub Actions работает в чистом окружении, где типы отсутствуют.
+          pip install types-requests
+          
+          # Убедимся, что requests установлен (если его нет в requirements.txt)
+          pip install requests
+
       - name: Run tests
         # ИСПРАВЛЕНИЕ: Добавляем текущую директорию (корень) в PYTHONPATH.
         # Это гарантирует, что Python найдет импорт "from agent.agent_pr_proposer import..."

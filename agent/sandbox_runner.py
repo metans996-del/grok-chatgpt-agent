@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def run_sandbox(image: str, command: str) -> Dict[str, str]:
     try:
-        client = docker.from_env()
+        client = docker.from_env()  # type: ignore
         container = client.containers.run(image, command, detach=True)
         container.wait()
         output = container.logs(stdout=True, stderr=True).decode('utf-8')
