@@ -10,40 +10,31 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from github import Github, GithubException, RateLimitExceededException
-from typing import List, Dict, Any, Tuple, Union
-from functools import partial  # <-- ДОБАВЛЕНО: Для корректной передачи именованных аргументов в run_in_executor
-from agent.agent_pr_proposer import propose_pr # <-- УБРАНА: (предполагаем, что этот файл больше не нужен, т.к. функционал PR реализован здесь)
+from typing import List, Dict, Any, Tuple
+from functools import partial
 
-# ========================= ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =========================
 load_dotenv()
 
-# ... (Настройка логирования и переменных окружения остаются без изменений) ...
-
-# ========================= НАСТРОЙКА ЛОГИРОВАНИЯ =========================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('bot.log'),  # Логи в файл
-        logging.StreamHandler(sys.stdout)  # Логи в консоль
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-# ========================= НАСТРОЙКИ =========================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO_NAME = os.getenv("REPO_NAME")
-# Убедимся, что ADMIN_CHAT_ID обрабатывается корректно
 try:
     ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 except ValueError:
     logger.warning("ADMIN_CHAT_ID в .env не является числом. Используется 0.")
     ADMIN_CHAT_ID = 0
 
-
-# Проверка наличия всех необходимых переменных
 required_vars = {
     "TELEGRAM_TOKEN": TOKEN,
     "OPENROUTER_KEY": OPENROUTER_KEY,
@@ -57,7 +48,6 @@ if missing_vars:
     logger.critical("Создайте файл .env с необходимыми переменными или настройте Systemd EnvironmentFile")
     sys.exit(1)
 
-# Цепочка моделей
 MODEL_CHAIN = [
     "anthropic/claude-3-opus",
     "openai/gpt-4o",
@@ -66,32 +56,19 @@ MODEL_CHAIN = [
     "mistral/mistral-large",
 ]
 
-# ========================= ГЛОБАЛЬНЫЕ СЧЕТЧИКИ И СТАРТОВОЕ ВРЕМЯ =========================
 START_TIME = time.time()
 PROCESSED_ISSUES_COUNT = 0
 BOT_VERSION = "v0.1.0"
 
 
-# ========================= УТИЛИТЫ ФОРМАТИРОВАНИЯ =========================
-
 def escape_html(text: str) -> str:
-    """
-    Экранирует специальные символы HTML. Используется для безопасного вывода
-    в режиме parse_mode='HTML'.
-    """
-    # Исправлено: Python-telegram-bot требует правильное экранирование
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-
-# ========================= GITHUB (АСИНХРОННАЯ ЧАСТЬ) =========================
 
 gh = Github(GITHUB_TOKEN)
 
 
 async def get_repo_with_wait(name):
-    """
-    Получает репозиторий с обработкой лимитов GitHub (асинхронная функция).
-    """
     while True:
         try:
             loop = asyncio.get_event_loop()
@@ -110,17 +87,13 @@ async def get_repo_with_wait(name):
 
 
 def _fetch_repo_files_sync(repo) -> List[str]:
-    """Синхронная функция для получения списка всех файлов в репозитории."""
     files_list = []
     try:
-        # Используем Git API для более эффективного получения всех файлов
         tree = repo.get_git_tree(repo.default_branch, recursive=True)
-        # Отфильтровываем только файлы (blob) и берем их пути
         files_list = [element.path for element in tree.tree if element.type == 'blob']
         return files_list
     except GithubException as e:
         logger.error(f"❌ Ошибка при получении списка файлов (get_git_tree): {e}. Попытка рекурсивного обхода...")
-        # Рекурсивный обход содержимого репозитория (менее эффективно)
         files_list = []
         try:
             contents = repo.get_contents("")
@@ -140,25 +113,19 @@ def _fetch_repo_files_sync(repo) -> List[str]:
 
 
 async def get_repo_files(repo) -> List[str]:
-    """
-    Получает список всех файлов в репозитории (рекурсивно, через пул потоков).
-    """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _fetch_repo_files_sync, repo)
 
 
 async def create_branch(repo, base_branch: str, new_branch_name: str):
-    """Создает новую ветку на основе базовой, используя functools.partial."""
     loop = asyncio.get_event_loop()
 
-    # 1. Получаем объект базовой ветки
     try:
         base_branch_ref = await loop.run_in_executor(None, partial(repo.get_git_ref, f"heads/{base_branch}"))
     except GithubException as e:
         logger.error(f"❌ Не удалось получить базовую ветку {base_branch}: {e}")
         raise
 
-    # 2. Создаем новую ветку
     try:
         new_ref = await loop.run_in_executor(
             None,
@@ -171,7 +138,6 @@ async def create_branch(repo, base_branch: str, new_branch_name: str):
         logger.info(f"✅ Ветка {new_branch_name} успешно создана.")
         return new_ref
     except GithubException as e:
-        # Если ветка уже существует, это нормально, просто пропускаем
         if e.status == 422 and "Reference already exists" in str(e):
             logger.warning(f"⚠️ Ветка {new_branch_name} уже существует. Продолжаем.")
             return await loop.run_in_executor(None, partial(repo.get_git_ref, f"heads/{new_branch_name}"))
@@ -181,33 +147,17 @@ async def create_branch(repo, base_branch: str, new_branch_name: str):
         raise
 
 
-# ========================= OPENROUTER (АСИНХРОННАЯ ЧАСТЬ) =========================
-
 def parse_model_response(content: str) -> str:
-    """
-    Надёжно извлекает чистый JSON из ответа модели, удаляя обертки ```json/```.
-    """
     content = content.strip()
-
-    # Поиск блока кода
     match = re.search(r"```(?:json)?\s*(.*)```", content, re.DOTALL | re.IGNORECASE)
-
     if match:
         content = match.group(1).strip()
-
-    # Если после очистки остался мусор, пробуем найти чистый JSON-массив
     if content.startswith('[') and content.endswith(']'):
         return content
-
-    # В противном случае, возвращаем исходный текст, пусть json.loads пробует сам
     return content
 
 
 async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    Последовательно вызывает модели из MODEL_CHAIN, пока одна из них не вернёт
-    валидный и парсируемый JSON.
-    """
     if not MODEL_CHAIN:
         raise Exception("❌ Цепочка моделей пуста! Добавьте модели в MODEL_CHAIN.")
 
@@ -232,7 +182,6 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
   }}
 ]
 """
-    # Исправлена опечатка в URL, убран Markdown-синтаксис
     openrouter_url = "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)"
 
     async with httpx.AsyncClient(timeout=180.0) as client:
@@ -247,7 +196,6 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
                     "max_tokens": 8000,
                 }
 
-                # Добавление response_format для моделей, которые его поддерживают
                 if any(k in model.lower() for k in ["openai", "gpt", "gemini"]):
                     request_data["response_format"] = {"type": "json_object"}
 
@@ -277,7 +225,6 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
                     continue
 
                 logger.info(f"✅ Успешно: Получен валидный ответ от модели **{model}**")
-                # Возвращаем tuple, как указано в типизации
                 return changes, model
 
             except json.JSONDecodeError as e:
@@ -298,15 +245,49 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
     raise Exception("❌ Все модели в цепочке недоступны или вернули ошибки.")
 
 
-# ========================= TELEGRAM HANDLERS =========================
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
 
-# ... (start_command, internal_status_command остаются без изменений, так как они корректны) ...
+    logger.info(f"Команда /start от пользователя {update.effective_user.id}")
+    await update.effective_message.reply_text(
+        "🤖 Бот запущен!\n\n"
+        "Доступные команды:\n"
+        "/start - Запуск бота\n"
+        "/runissue <номер> - Запустить задачу GitHub Issue\n"
+        "/test - Тестовый запрос к моделям\n"
+        "/status - Показать текущий статус бота\n"
+        "/health - Проверить подключение к GitHub",
+        parse_mode='HTML'
+    )
+
+
+async def internal_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+
+    logger.info(f"Команда /status от пользователя {update.effective_user.id}")
+
+    uptime_seconds = int(time.time() - START_TIME)
+    hours = uptime_seconds // 3600
+    minutes = (uptime_seconds % 3600) // 60
+
+    uptime_str = f"{hours}ч {minutes}мин"
+
+    status_text = f"Агент {BOT_VERSION}\n"
+    status_text += f"Uptime: {uptime_str}\n"
+    status_text += f"Обработано задач: {PROCESSED_ISSUES_COUNT}\n"
+    status_text += "Режим: <b>polling (VPS)</b>\n"
+    status_text += "Готов к работе ✅"
+
+    await update.effective_message.reply_text(
+        status_text,
+        parse_mode='HTML'
+    )
+
 
 async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запускает LLM-агента для решения задачи (Issue) по номеру, коммитит и создает PR."""
-
-    # 1. Проверка
-    if not update.effective_message or not update.effective_user: # <--- Mypy-Fix: явная проверка
+    if not update.effective_message or not update.effective_user:
         return
 
     logger.info(f"Команда /runissue от пользователя {update.effective_user.id}")
@@ -324,11 +305,9 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = await update.effective_message.reply_text(f"⏳ Запускаю выполнение задачи <b>#{issue_number}</b>...", parse_mode='HTML')
 
     try:
-        # 2. Получение репозитория и Issue
         repo = await get_repo_with_wait(REPO_NAME)
         loop = asyncio.get_event_loop()
 
-        # Используем partial для синхронного вызова
         issue = await loop.run_in_executor(None, partial(repo.get_issue, issue_number))
 
         if not issue:
@@ -340,10 +319,8 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 3. Получение списка файлов
         files_list = await get_repo_files(repo)
 
-        # 4. Вызов LLM
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -353,13 +330,10 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         changes, model_used = await call_openrouter(issue, files_list)
 
-        # --- ЛОГИКА PULL REQUEST ---
-
         base_branch = repo.default_branch
         new_branch_name = f"agent-fix-issue-{issue_number}"
         commit_message = f"Fix: #{issue_number} - {issue.title}"
 
-        # A. Создание новой ветки
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -368,7 +342,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await create_branch(repo, base_branch, new_branch_name)
 
-        # B. Коммит изменений
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -379,11 +352,10 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for change in changes:
             file_path = change['file']
             action = change['action']
-            content = change['content'] # Содержимое должно быть строкой (текст) или base64 (бинарный файл)
+            content = change['content']
 
             try:
                 if action == 'create':
-                    # Fix: использование partial для именованного аргумента branch
                     create_file_func = partial(
                         repo.create_file,
                         file_path,
@@ -394,13 +366,11 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await loop.run_in_executor(None, create_file_func)
 
                 elif action == 'modify':
-                    # Fix: использование partial для именованного аргумента ref
                     file_info = await loop.run_in_executor(
                         None,
                         partial(repo.get_contents, file_path, ref=base_branch)
                     )
 
-                    # Fix: использование partial для именованного аргумента branch
                     update_file_func = partial(
                         repo.update_file,
                         file_path,
@@ -412,8 +382,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await loop.run_in_executor(None, update_file_func)
 
                 elif action == 'delete':
-                    # Добавим логику удаления (если LLM ее сгенерирует)
-                    # Получаем sha
                     file_info = await loop.run_in_executor(
                         None,
                         partial(repo.get_contents, file_path, ref=new_branch_name)
@@ -431,7 +399,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"💾 Файл {file_path} успешно {action} в ветке {new_branch_name}")
 
             except Exception:
-                # В случае ошибки коммита - немедленно прекращаем работу
                 error_commit = f"❌ Ошибка коммита: Не удалось изменить файл <code>{file_path}</code>. Проверьте лог."
                 logger.error(error_commit, exc_info=True)
                 await context.bot.edit_message_text(
@@ -442,7 +409,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        # C. Создание Pull Request
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -453,7 +419,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pr_title = f"[Agent] Fix for Issue #{issue_number}: {issue.title}"
         pr_body = f"Автоматически сгенерировано LLM-агентом (<code>{model_used}</code>) для решения задачи #{issue_number}.\n\n{issue.body or ''}"
 
-        # Fix: использование partial для именованных аргументов base и head
         create_pull_func = partial(
             repo.create_pull,
             pr_title,
@@ -463,9 +428,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         pull_request = await loop.run_in_executor(None, create_pull_func)
 
-        # 5. Финальное сообщение
-
-        # УВЕЛИЧИВАЕМ СЧЕТЧИК УСПЕШНО ОБРАБОТАННЫХ ЗАДАЧ
         global PROCESSED_ISSUES_COUNT
         PROCESSED_ISSUES_COUNT += 1
 
@@ -483,7 +445,6 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except GithubException as e:
-        # Fix: Явная проверка, является ли e.data словарем, перед вызовом .get()
         message_data = e.data
         error_message = message_data.get('message', 'Нет сообщения') if isinstance(message_data, dict) else str(message_data)
         error_msg_raw = f"❌ Ошибка GitHub API при работе с Issue #{issue_number}: {e.status} - {error_message}"
@@ -502,59 +463,9 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=message.chat_id, message_id=message.message_id, text=error_msg_safe, parse_mode='HTML'
         )
 
-# ... (test_command, github_status_command, main остаются без изменений, так как они корректны) ...
-
-
-# ========================= TELEGRAM HANDLERS =========================
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    if not update.effective_message or not update.effective_user: # <--- Mypy-Fix: явная проверка
-        return
-
-    logger.info(f"Команда /start от пользователя {update.effective_user.id}")
-    await update.effective_message.reply_text( # <--- Mypy-Fix: использование effective_message
-        "🤖 Бот запущен!\n\n"
-        "Доступные команды:\n"
-        "/start - Запуск бота\n"
-        "/runissue <номер> - Запустить задачу GitHub Issue\n"
-        "/test - Тестовый запрос к моделям\n"
-        "/status - Показать текущий статус бота\n"
-        "/models - Список доступных моделей",
-        parse_mode='HTML'
-    )
-
-
-async def internal_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Показывает внутренний статус бота: время работы, количество обработанных задач и режим.
-    """
-    if not update.effective_message or not update.effective_user: # <--- Mypy-Fix: явная проверка
-        return
-
-    logger.info(f"Команда /status от пользователя {update.effective_user.id}")
-
-    # Расчет Uptime
-    uptime_seconds = int(time.time() - START_TIME)
-    hours = uptime_seconds // 3600
-    minutes = (uptime_seconds % 3600) // 60
-
-    uptime_str = f"{hours}ч {minutes}мин"
-
-    status_text = f"Агент {BOT_VERSION}\n"
-    status_text += f"Uptime: {uptime_str}\n"
-    status_text += f"Обработано задач: {PROCESSED_ISSUES_COUNT}\n"
-    status_text += "Режим: <b>polling (VPS)</b>\n"
-    status_text += "Готов к работе ✅"
-
-    await update.effective_message.reply_text( # <--- Mypy-Fix: использование effective_message
-        status_text,
-        parse_mode='HTML'
-    )
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Тестовая команда для проверки работы моделей"""
-    if not update.effective_message or not update.effective_user: # <--- Mypy-Fix: явная проверка
+    if not update.effective_message or not update.effective_user:
         return
 
     logger.info(f"Команда /test от пользователя {update.effective_user.id}")
@@ -604,8 +515,7 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка статуса подключения к GitHub"""
-    if not update.effective_message or not update.effective_user: # <--- Mypy-Fix: явная проверка
+    if not update.effective_message or not update.effective_user:
         return
 
     logger.info(f"Команда /status от пользователя {update.effective_user.id}")
@@ -623,7 +533,6 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
         status_text += f"🔀 Форков: {repo.forks_count}\n\n"
         status_text += "📊 Rate Limit:\n"
         status_text += f"• Осталось: {rate_limit.core.remaining}/{rate_limit.core.limit}\n"
-        # Fix: Time zone conversion can be complex; simplified formatting.
         reset_time_utc = rate_limit.core.reset.strftime('%Y-%m-%d %H:%M:%S UTC')
         status_text += f"• Сброс: {reset_time_utc}\n"
 
@@ -646,24 +555,18 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 def main():
-    """Запуск бота с использованием Long Polling."""
+
     logger.info("🚀 Бот запускается...")
     try:
-        # Создаем Application
         application = Application.builder().token(TOKEN).build()
 
-        # Добавляем обработчики команд
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("status", internal_status_command))
         application.add_handler(CommandHandler("health", github_status_command))
         application.add_handler(CommandHandler("runissue", run_issue_command))
         application.add_handler(CommandHandler("test", test_command))
 
-        # application.add_handler(CommandHandler("models", models_command)) # Нет реализации
-
-        # Запускаем бота
         logger.info("✅ Бот готов. Начинаю Long Polling.")
-        # Fix: Передача allowed_updates - хорошая практика
         application.run_polling(allowed_updates=Update.ALL_TYPES)
 
     except Exception as e:
