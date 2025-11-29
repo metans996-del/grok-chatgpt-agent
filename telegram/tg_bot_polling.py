@@ -6,14 +6,14 @@ import logging
 import sys
 import os
 import httpx
-from dotenv import load_dotenv # F401: удален, если не используется, но оставлен в импортах, т.к. может быть нужен в .py
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from github import Github, GithubException, RateLimitExceededException
 from typing import List, Dict, Any, Tuple
 
 # ========================= ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =========================
-load_dotenv() # Раскомментирован для корректной работы
+load_dotenv()
 
 # ========================= НАСТРОЙКА ЛОГИРОВАНИЯ =========================
 logging.basicConfig(
@@ -113,7 +113,6 @@ def _fetch_repo_files_sync(repo) -> List[str]:
                 files_list.append(file_content.path)
         return files_list
     except Exception as e:
-        # F841: Исключена неиспользуемая 'e'
         logger.error(f"❌ Ошибка при получении списка файлов: {e}")
         return ["README.md", "LICENSE"]
 
@@ -279,7 +278,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Бот запущен!\n\n"
         "Доступные команды:\n"
         "/start - Запуск бота\n"
-        "/runissue &lt;номер&gt; - Запустить задачу GitHub Issue\n"
+        "/runissue <номер> - Запустить задачу GitHub Issue\n"
         "/test - Тестовый запрос к моделям\n"
         "/status - Показать текущий статус бота\n"
         "/models - Список доступных моделей",
@@ -432,7 +431,7 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(
             chat_id=message.chat_id,
             message_id=message.message_id,
-            text="🤝 Коммиты готовы. Создаю Pull Request...",
+            text="🤝 Коммиты готовы. Создаю Pull Request...",  # F541: Удален лишний 'f'
             parse_mode='HTML'
         )
 
@@ -506,7 +505,7 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         escaped_model_used = escape_html(model_used)
 
-        result_text = f"✅ Успешно!\n\n"
+        result_text = "✅ Успешно!\n\n"
         result_text += f"🤖 Модель: <b>{escaped_model_used}</b>\n"
         result_text += f"📝 Изменений: <b>{len(changes)}</b>\n\n"
         result_text += "<b>Предложенные файлы:</b>\n"
@@ -515,7 +514,6 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_name = escape_html(change.get('file', 'unknown'))
             action = escape_html(change.get('action', 'unknown'))
             content_len = len(change.get('content', ''))
-            # F541: Исправлено использование f-строки
             result_text += f"• <b>{file_name}</b> ({action}, {content_len} байт)\n"
 
         await context.bot.edit_message_text(
@@ -551,11 +549,11 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
 
         escaped_repo_full_name = escape_html(repo.full_name)
 
-        status_text = f"✅ Подключение успешно!\n\n"
+        status_text = "✅ Подключение успешно!\n\n"
         status_text += f"📦 Репозиторий: <b>{escaped_repo_full_name}</b>\n"
         status_text += f"⭐️ Звёзд: {repo.stargazers_count}\n"
         status_text += f"🔀 Форков: {repo.forks_count}\n\n"
-        status_text += f"📊 Rate Limit:\n"
+        status_text += "📊 Rate Limit:\n"
         status_text += f"• Осталось: {rate_limit.core.remaining}/{rate_limit.core.limit}\n"
         status_text += f"• Сброс: {rate_limit.core.reset.strftime('%H:%M:%S')}\n"
 
