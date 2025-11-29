@@ -47,7 +47,7 @@ def propose_pr(
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=10)
 
         # Проверяем статус. Если 4xx или 5xx, переходим к обработке ошибки.
         # response.raise_for_status() - не используется для обработки кастомных сообщений.
