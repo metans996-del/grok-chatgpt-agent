@@ -7,7 +7,7 @@ import sys
 import os
 import httpx
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update  # type: ignore
 from telegram.ext import Application, CommandHandler, ContextTypes
 from github import Github, GithubException, RateLimitExceededException
 from typing import List, Dict, Any, Tuple
