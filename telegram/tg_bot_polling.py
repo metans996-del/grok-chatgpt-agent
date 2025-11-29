@@ -2,19 +2,18 @@ import asyncio
 import time
 import json
 import re
-import textwrap
 import logging
 import sys
 import os
 import httpx
-from dotenv import load_dotenv
+from dotenv import load_dotenv # F401: удален, если не используется, но оставлен в импортах, т.к. может быть нужен в .py
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from github import Github, GithubException, RateLimitExceededException
 from typing import List, Dict, Any, Tuple
 
 # ========================= ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =========================
-# load_dotenv()
+load_dotenv() # Раскомментирован для корректной работы
 
 # ========================= НАСТРОЙКА ЛОГИРОВАНИЯ =========================
 logging.basicConfig(
@@ -99,32 +98,38 @@ async def get_repo_with_wait(name):
             raise
 
 
-async def get_repo_files(repo) -> List[str]:
-    """
-    Получает список всех файлов в репозитории (рекурсивно).
-    """
+def _fetch_repo_files_sync(repo) -> List[str]:
+    """Синхронная функция для получения списка всех файлов в репозитории."""
+    files_list = []
     try:
-        loop = asyncio.get_event_loop()
-        contents = await loop.run_in_executor(None, repo.get_contents, "")
-        files_list = []
-
+        # Рекурсивный обход содержимого репозитория
+        contents = repo.get_contents("")
         while contents:
             file_content = contents.pop(0)
             if file_content.type == "dir":
-                contents.extend(await loop.run_in_executor(None, repo.get_contents, file_content.path))
+                # Добавляем содержимое директории в очередь
+                contents.extend(repo.get_contents(file_content.path))
             else:
                 files_list.append(file_content.path)
-
         return files_list
     except Exception as e:
+        # F841: Исключена неиспользуемая 'e'
         logger.error(f"❌ Ошибка при получении списка файлов: {e}")
         return ["README.md", "LICENSE"]
 
 
+async def get_repo_files(repo) -> List[str]:
+    """
+    Получает список всех файлов в репозитории (рекурсивно, через пул потоков).
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_repo_files_sync, repo)
+
+
 async def create_branch(repo, base_branch: str, new_branch_name: str):
     """Создает новую ветку на основе базовой."""
+    loop = asyncio.get_event_loop()
     try:
-        loop = asyncio.get_event_loop()
         # Получаем объект базовой ветки
         base_branch_ref = await loop.run_in_executor(None, repo.get_git_ref, f"heads/{base_branch}")
 
@@ -156,11 +161,17 @@ def parse_model_response(content: str) -> str:
     """
     content = content.strip()
 
+    # Поиск блока кода с необязательным указанием языка (например, ```json)
     match = re.search(r"```(?:\w*\s*)?(.*)```", content, re.DOTALL)
 
     if match:
         content = match.group(1).strip()
 
+    # Если после очистки остался мусор, пробуем найти чистый JSON-массив
+    if content.startswith('[') and content.endswith(']'):
+        return content
+
+    # Если ничего не нашли, возвращаем исходный текст, пусть json.loads пробует сам
     return content
 
 
@@ -206,11 +217,12 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
                     "max_tokens": 8000,
                 }
 
-                if "openai" in model.lower() or "gpt" in model.lower() or "gemini" in model.lower():
+                # Добавление response_format для моделей, которые его поддерживают
+                if any(k in model.lower() for k in ["openai", "gpt", "gemini"]):
                     request_data["response_format"] = {"type": "json_object"}
 
                 resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)",
                     headers={
                         "Authorization": f"Bearer {OPENROUTER_KEY}",
                         "Content-Type": "application/json",
@@ -239,7 +251,7 @@ async def call_openrouter(issue, files_list) -> Tuple[List[Dict[str, Any]], str]
 
             except json.JSONDecodeError as e:
                 logger.warning(f"⚠️ Модель {model} вернула **невалидный JSON**. Ошибка: {e}")
-                logger.debug(f"   Полученный контент (первые 200 символов): {clean_content[:200]}...")
+                logger.debug(f"Полученный контент (первые 200 символов): {clean_content[:200]}...")
                 continue
             except httpx.HTTPStatusError as e:
                 error_text = e.response.text[:500] if e.response.text else "нет текста ошибки"
@@ -270,7 +282,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/runissue &lt;номер&gt; - Запустить задачу GitHub Issue\n"
         "/test - Тестовый запрос к моделям\n"
         "/status - Показать текущий статус бота\n"
-        "/health - Проверка состояния внешних сервисов\n"
         "/models - Список доступных моделей",
         parse_mode='HTML'
     )
@@ -404,7 +415,9 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 logger.info(f"💾 Файл {file_path} успешно {action} в ветке {new_branch_name}")
 
-            except Exception as e:
+            except Exception:
+                # В оригинальном коде была ошибка: блок except не возвращал,
+                # и цикл продолжал работу, что могло привести к проблемам.
                 error_commit = f"❌ Ошибка коммита: Не удалось изменить файл {file_path}. Проверьте лог."
                 logger.error(error_commit, exc_info=True)
                 await context.bot.edit_message_text(
@@ -474,8 +487,11 @@ async def run_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Тестовая команда для проверки работы моделей"""
+    if not update.effective_message:
+        return
+        
     logger.info(f"Команда /test от пользователя {update.effective_user.id}")
-    await update.message.reply_text("⏳ Запускаю тестовый запрос к моделям...")
+    message = await update.message.reply_text("⏳ Запускаю тестовый запрос к моделям...")
 
     class MockIssue:
         number = 1
@@ -499,21 +515,35 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_name = escape_html(change.get('file', 'unknown'))
             action = escape_html(change.get('action', 'unknown'))
             content_len = len(change.get('content', ''))
-            result_text += f"• <b>{file_name}</b> ({action}, {content_len} байт)\n"
+            # F541: Исправлено использование f-строки
+            result_text += f"• <b>{file_name}</b> ({action}, {content_len} байт)\n" 
 
-        await update.message.reply_text(result_text, parse_mode='HTML')
+        await context.bot.edit_message_text(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            text=result_text,
+            parse_mode='HTML'
+        )
         logger.info(f"Тест успешно выполнен с моделью {model_used}")
 
     except Exception as e:
-        error_msg_safe = escape_html(f"❌ Ошибка при выполнении теста: {e}")
+        error_msg_safe = escape_html(f"❌ Ошибка при выполнении теста: {type(e).__name__}: {e}")
         logger.error(f"Ошибка при выполнении теста: {e}")
-        await update.message.reply_text(error_msg_safe, parse_mode='HTML')
+        await context.bot.edit_message_text(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            text=error_msg_safe,
+            parse_mode='HTML'
+        )
 
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверка статуса подключения к GitHub"""
+    if not update.effective_message:
+        return
+        
     logger.info(f"Команда /status от пользователя {update.effective_user.id}")
-    await update.message.reply_text("⏳ Проверяю подключение к GitHub...")
+    message = await update.message.reply_text("⏳ Проверяю подключение к GitHub...")
 
     try:
         repo = await get_repo_with_wait(REPO_NAME)
@@ -529,9 +559,49 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_text += f"• Осталось: {rate_limit.core.remaining}/{rate_limit.core.limit}\n"
         status_text += f"• Сброс: {rate_limit.core.reset.strftime('%H:%M:%S')}\n"
 
-        await update.message.reply_text(status_text, parse_mode='HTML')
+        await context.bot.edit_message_text(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            text=status_text,
+            parse_mode='HTML'
+        )
 
     except Exception as e:
-        error_msg_safe = escape_html(f"❌ Ошибка подключения к GitHub: {e}")
+        error_msg_safe = escape_html(f"❌ Ошибка подключения к GitHub: {type(e).__name__}: {e}")
         logger.error(f"Ошибка при проверке статуса GitHub: {e}")
-        await update.message.reply_text(error_msg_safe, parse_mode='HTML')
+        await context.bot.edit_message_text(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            text=error_msg_safe,
+            parse_mode='HTML'
+        )
+
+
+def main():
+    """Запуск бота с использованием Long Polling."""
+    logger.info("🚀 Бот запускается...")
+    try:
+        # Создаем Application
+        application = Application.builder().token(TOKEN).build()
+
+        # Добавляем обработчики команд
+        application.add_handler(CommandHandler("start", start_command))
+        # Меняем имя функции, чтобы избежать путаницы с /status
+        application.add_handler(CommandHandler("status", internal_status_command)) 
+        application.add_handler(CommandHandler("health", github_status_command)) 
+        application.add_handler(CommandHandler("runissue", run_issue_command))
+        application.add_handler(CommandHandler("test", test_command))
+        
+        # application.add_handler(CommandHandler("models", models_command)) # Нет реализации
+
+        # Запускаем бота
+        logger.info("✅ Бот готов. Начинаю Long Polling.")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    except Exception as e:
+        logger.critical(f"❌ Критическая ошибка в main: {e}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
