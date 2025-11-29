@@ -1,9 +1,8 @@
 import logging
-import os
-from typing import Dict, List
-
+from typing import Dict
 import docker
 from docker.errors import DockerException
+
 
 logger = logging.getLogger(__name__)
 

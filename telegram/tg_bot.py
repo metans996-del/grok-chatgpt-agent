@@ -1,15 +1,16 @@
 import logging
 import os
-from typing import Dict, List
 
 import telegram
-from telegram.ext import Updater, CommandHandler, MessageHandler
+from telegram.ext import Updater, CommandHandler
+
 
 logger = logging.getLogger(__name__)
 
 
 def start(update: telegram.Update, context: telegram.ext.CallbackContext) -> None:
     context.bot.send_message(chat_id=update.effective_chat.id, text='Hello!')
+
 
 def main() -> None:
     token = os.environ['TELEGRAM_TOKEN']

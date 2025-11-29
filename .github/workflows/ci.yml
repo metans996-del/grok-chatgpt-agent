@@ -24,7 +24,11 @@ jobs:
           pip install flake8 mypy bandit
 
       - name: Run tests
-        run: pytest -q
+        # ИСПРАВЛЕНИЕ: Добавляем текущую директорию (корень) в PYTHONPATH.
+        # Это гарантирует, что Python найдет импорт "from agent.agent_pr_proposer import..."
+        run: |
+          export PYTHONPATH=$PYTHONPATH:.
+          pytest -q
 
       - name: Lint with flake8
         run: flake8 .
