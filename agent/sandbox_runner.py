@@ -1,19 +1,18 @@
-import logging
-from typing import Dict
-import docker
-from docker.errors import DockerException
+import os
+from github import GithubException
 
+class SandboxRunner:
+    # ...
 
-logger = logging.getLogger(__name__)
-
-
-def run_sandbox(image: str, command: str) -> Dict[str, str]:
-    try:
-        client = docker.from_env()  # type: ignore
-        container = client.containers.run(image, command, detach=True)
-        container.wait()
-        output = container.logs(stdout=True, stderr=True).decode('utf-8')
-        return {'status': 'success', 'output': output}
-    except DockerException as e:
-        logger.error(f'Error running sandbox: {e}')
-        return {'status': 'failure', 'message': 'Error running sandbox'}
+    def run_issue_command(self, action, new_branch_name, file_path):
+        # ...
+        elif action == 'delete':
+            try:
+                file = self.repo.get_contents(file_path, ref=new_branch_name)
+            except GithubException as e:
+                if e.status == 404:
+                    print(f"Файл {file_path} не найден в ветке {new_branch_name}")
+                    return
+                else:
+                    raise
+            # ...
